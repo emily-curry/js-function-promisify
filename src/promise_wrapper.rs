@@ -79,6 +79,23 @@ impl PromiseWrapper {
     let func: Function = js_func.into();
     func
   }
+
+  pub fn get_reject_closure(&self) -> Rc<Closure<dyn FnMut(JsValue)>> {
+    let inner = self.inner.borrow();
+    let cb = inner
+      .reject
+      .as_ref()
+      .expect("closure should've been defined on construction");
+    let ptr = Rc::clone(&cb);
+    ptr
+  }
+
+  pub fn get_reject_function(&self) -> Function {
+    let cb_ptr = self.get_reject_closure();
+    let js_func: JsValue = cb_ptr.as_ref().as_ref().into();
+    let func: Function = js_func.into();
+    func
+  }
 }
 
 struct PromiseWrapperInner {
