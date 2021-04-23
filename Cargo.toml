@@ -3,7 +3,7 @@ authors = ["Emily Curry <emily@curry.sh>"]
 edition = "2018"
 license = "MIT"
 name = "js-function-promisify"
-version = "0.1.1"
+version = "0.1.2"
 
 [dependencies]
 js-sys = {version = "^0.3.0"}
