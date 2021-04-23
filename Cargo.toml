@@ -1,0 +1,17 @@
+[package]
+authors = ["Emily Curry <emily@curry.sh>"]
+edition = "2018"
+license = "MIT"
+name = "js_function_promisify"
+version = "0.1.0"
+
+[dependencies]
+js-sys = {version = "^0.3.0"}
+wasm-bindgen = {version = "^0.2.73"}
+
+[dev-dependencies]
+wasm-bindgen-test = "^0.3.13"
+
+[profile.release]
+# Tell `rustc` to optimize for small code size.
+opt-level = "s"
