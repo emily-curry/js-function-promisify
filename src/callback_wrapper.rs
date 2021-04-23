@@ -32,9 +32,23 @@ pub struct CallbackWrapper {
 }
 
 impl CallbackWrapper {
+  /// Creates a new `CallbackWrapper` wrapping a simple callback in the form `(data) => any`.
+  /// The result of awaiting this wrapper will be Ok(data).
   pub fn new() -> Self {
     let func = |x| Ok(x);
     CallbackWrapper::from(CallbackKind::Arg1(Box::new(func)))
+  }
+
+  /// Creates a new `CallbackWrapper` wrapping a node-style callback in the form `(err, data) => any`.
+  /// The result of awaiting this wrapper will be Ok(data) if `err` was null or undefined, or Err(err) otherwise.
+  pub fn new_node() -> Self {
+    let func = |err: JsValue, data: JsValue| {
+      if err.is_null() || err.is_undefined() {
+        return Ok(data);
+      }
+      Err(err)
+    };
+    CallbackWrapper::from(CallbackKind::Arg2(Box::new(func)))
   }
 
   pub fn from(cb: CallbackKind) -> Self {
@@ -99,12 +113,11 @@ struct CallbackWrapperInner {
 
 impl CallbackWrapperInner {
   fn new() -> Rc<RefCell<CallbackWrapperInner>> {
-    let inner = Rc::new(RefCell::new(CallbackWrapperInner {
+    Rc::new(RefCell::new(CallbackWrapperInner {
       cb: None,
       task: None,
       result: None,
-    }));
-    inner
+    }))
   }
 }
 
