@@ -1,3 +1,5 @@
+use crate::callback_kind::CallbackKind;
+use crate::closure_kind::ClosureKind;
 use js_sys::Function;
 use std::cell::RefCell;
 use std::future::Future;
@@ -6,7 +8,24 @@ use std::task::Poll;
 use std::task::Waker;
 
 use wasm_bindgen::prelude::Closure;
-use wasm_bindgen::{JsCast, JsValue};
+use wasm_bindgen::JsValue;
+
+fn finish(state: &RefCell<CallbackWrapperInner>, val: Result<JsValue, JsValue>) {
+  let task = {
+    let mut state = state.borrow_mut();
+    debug_assert!(state.cb.is_some());
+    debug_assert!(state.result.is_none());
+    if let Some(cb) = &state.cb {
+      drop(cb)
+    }
+    state.result = Some(val);
+    state.task.take()
+  };
+
+  if let Some(task) = task {
+    task.wake()
+  }
+}
 
 pub struct CallbackWrapper {
   inner: Rc<RefCell<CallbackWrapperInner>>,
@@ -14,66 +33,79 @@ pub struct CallbackWrapper {
 
 impl CallbackWrapper {
   pub fn new() -> Self {
-    let func = &|x| Ok(x);
-    CallbackWrapper::from_arg1(func)
+    let func = |x| Ok(x);
+    CallbackWrapper::from(CallbackKind::Arg1(Box::new(func)))
   }
 
-  pub fn from_arg1<F>(f: &'static F) -> Self
-  where
-    F: Fn(JsValue) -> Result<JsValue, JsValue>,
-  {
-    let inner = Rc::new(RefCell::new(CallbackWrapperInner {
-      cb: None,
-      task: None,
-      result: None,
-    }));
+  pub fn from(cb: CallbackKind) -> Self {
+    let inner = CallbackWrapperInner::new();
 
-    let cb: Closure<dyn FnMut(JsValue)> = {
-      let state = inner.clone();
-      Closure::once(move |val| CallbackWrapper::finish(&state, f(val)))
+    let state = inner.clone();
+    let ckind = match cb {
+      CallbackKind::Arg0(mut f) => ClosureKind::Arg0(Closure::once(move || finish(&state, f()))),
+      CallbackKind::Arg1(mut f) => {
+        ClosureKind::Arg1(Closure::once(move |a1| finish(&state, f(a1))))
+      }
+      CallbackKind::Arg2(mut f) => {
+        ClosureKind::Arg2(Closure::once(move |a1, a2| finish(&state, f(a1, a2))))
+      }
+      CallbackKind::Arg3(mut f) => ClosureKind::Arg3(Closure::once(move |a1, a2, a3| {
+        finish(&state, f(a1, a2, a3))
+      })),
+      CallbackKind::Arg4(mut f) => ClosureKind::Arg4(Closure::once(move |a1, a2, a3, a4| {
+        finish(&state, f(a1, a2, a3, a4))
+      })),
+      CallbackKind::Arg5(mut f) => ClosureKind::Arg5(Closure::once(move |a1, a2, a3, a4, a5| {
+        finish(&state, f(a1, a2, a3, a4, a5))
+      })),
     };
-    inner.borrow_mut().cb = Some(Rc::new(cb));
+
+    inner.borrow_mut().cb = Some(Rc::new(ckind));
     let wrapper = Self { inner };
 
     wrapper
   }
 
-  pub fn get_closure(&self) -> Rc<Closure<dyn FnMut(JsValue)>> {
+  pub fn get_closure(&self) -> Rc<ClosureKind> {
     let inner = self.inner.borrow();
-    let cb = inner.cb.as_ref().unwrap();
+    let cb = inner
+      .cb
+      .as_ref()
+      .expect("closure should've been defined on construction");
     let ptr = Rc::clone(&cb);
     ptr
   }
 
   pub fn get_function(&self) -> Function {
     let cb_ptr = self.get_closure();
-    let js_func: JsValue = cb_ptr.as_ref().as_ref().into();
+    let js_func: JsValue = match cb_ptr.as_ref() {
+      ClosureKind::Arg0(c) => c.as_ref().into(),
+      ClosureKind::Arg1(c) => c.as_ref().into(),
+      ClosureKind::Arg2(c) => c.as_ref().into(),
+      ClosureKind::Arg3(c) => c.as_ref().into(),
+      ClosureKind::Arg4(c) => c.as_ref().into(),
+      ClosureKind::Arg5(c) => c.as_ref().into(),
+    };
     let func: Function = js_func.into();
     func
-  }
-
-  fn finish(state: &RefCell<CallbackWrapperInner>, val: Result<JsValue, JsValue>) {
-    let task = {
-      let mut state = state.borrow_mut();
-      debug_assert!(state.cb.is_some());
-      debug_assert!(state.result.is_none());
-      if let Some(cb) = &state.cb {
-        drop(cb)
-      }
-      state.result = Some(val);
-      state.task.take()
-    };
-
-    if let Some(task) = task {
-      task.wake()
-    }
   }
 }
 
 struct CallbackWrapperInner {
-  cb: Option<Rc<Closure<dyn FnMut(JsValue)>>>,
+  cb: Option<Rc<ClosureKind>>,
   result: Option<Result<JsValue, JsValue>>,
   task: Option<Waker>,
+}
+
+impl CallbackWrapperInner {
+  fn new() -> Rc<RefCell<CallbackWrapperInner>> {
+    let inner = Rc::new(RefCell::new(CallbackWrapperInner {
+      cb: None,
+      task: None,
+      result: None,
+    }));
+    inner
+  }
 }
 
 impl Future for CallbackWrapper {
