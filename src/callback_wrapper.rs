@@ -43,7 +43,7 @@ impl CallbackWrapper {
   }
 
   pub fn get_closure(&self, callback: CallbackKind) -> Rc<ClosureKind> {
-    let state = self.inner.clone();
+    let state = Rc::clone(&self.inner);
     let closure_kind = match callback {
       CallbackKind::Arg0(mut f) => ClosureKind::Arg0(Closure::once(move || finish(&state, f()))),
       CallbackKind::Arg1(mut f) => {
