@@ -1,5 +1,6 @@
 use crate::callback_kind::CallbackKind;
 use crate::closure_kind::ClosureKind;
+use js_sys::Function;
 use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
@@ -21,6 +22,12 @@ impl<F: ?Sized> Callback<F> {
     F: 'static,
   {
     Self { closure }
+  }
+
+  pub fn to_function(&self) -> Function {
+    let js_func: JsValue = self.closure.as_ref().into();
+    let func: Function = js_func.into();
+    func
   }
 }
 
@@ -61,7 +68,7 @@ impl CallbackWrapper {
   where
     F: 'static + FnMut(JsValue) -> Result<JsValue, JsValue>,
   {
-    let state = self.inner.clone();
+    let state = Rc::clone(&self.inner);
     let closure = Closure::once(move |a1| finish(&state, cb(a1)));
     let callback = Callback::new(closure);
     self.register_callback(callback)
