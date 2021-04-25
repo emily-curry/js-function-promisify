@@ -5,9 +5,28 @@ use std::future::Future;
 use std::rc::Rc;
 use std::task::Poll;
 use std::task::Waker;
+use wasm_bindgen::closure::WasmClosureFnOnce;
 
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsValue;
+
+#[derive(Debug)]
+pub struct Callback<F: ?Sized> {
+  closure: Closure<F>,
+}
+
+impl<F: ?Sized> Callback<F> {
+  pub fn new(closure: Closure<F>) -> Self
+  where
+    F: 'static,
+  {
+    Self { closure }
+  }
+}
+
+trait CallbackMarker {}
+
+impl CallbackMarker for Callback<dyn FnMut(JsValue)> {}
 
 fn finish(state: &RefCell<CallbackWrapperInner>, val: Result<JsValue, JsValue>) {
   let task = {
@@ -25,7 +44,7 @@ fn finish(state: &RefCell<CallbackWrapperInner>, val: Result<JsValue, JsValue>) 
   }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct CallbackWrapper {
   inner: Rc<RefCell<CallbackWrapperInner>>,
 }
@@ -38,53 +57,74 @@ impl CallbackWrapper {
     }
   }
 
-  pub fn get(&self) -> Rc<ClosureKind> {
-    self.get_closure(CallbackKind::Arg1(Box::new(|x| Ok(x))))
+  pub fn get_args1<F>(&self, mut cb: F) -> Rc<Callback<dyn FnMut(JsValue)>>
+  where
+    F: 'static + FnMut(JsValue) -> Result<JsValue, JsValue>,
+  {
+    let state = self.inner.clone();
+    let closure = Closure::once(move |a1| finish(&state, cb(a1)));
+    let callback = Callback::new(closure);
+    self.register_callback(callback)
   }
 
-  pub fn get_closure(&self, callback: CallbackKind) -> Rc<ClosureKind> {
-    let state = self.inner.clone();
-    let closure_kind = match callback {
-      CallbackKind::Arg0(mut f) => ClosureKind::Arg0(Closure::once(move || finish(&state, f()))),
-      CallbackKind::Arg1(mut f) => {
-        ClosureKind::Arg1(Closure::once(move |a1| finish(&state, f(a1))))
-      }
-      CallbackKind::Arg2(mut f) => {
-        ClosureKind::Arg2(Closure::once(move |a1, a2| finish(&state, f(a1, a2))))
-      }
-      CallbackKind::Arg3(mut f) => ClosureKind::Arg3(Closure::once(move |a1, a2, a3| {
-        finish(&state, f(a1, a2, a3))
-      })),
-      CallbackKind::Arg4(mut f) => ClosureKind::Arg4(Closure::once(move |a1, a2, a3, a4| {
-        finish(&state, f(a1, a2, a3, a4))
-      })),
-      CallbackKind::Arg5(mut f) => ClosureKind::Arg5(Closure::once(move |a1, a2, a3, a4, a5| {
-        finish(&state, f(a1, a2, a3, a4, a5))
-      })),
-    };
-    let ptr = Rc::new(closure_kind);
+  fn register_callback<F>(&self, cb: F) -> Rc<F>
+  where
+    F: 'static + CallbackMarker,
+  {
+    let ptr = Rc::new(cb);
     let ret = Rc::clone(&ptr);
     let mut state = self.inner.borrow_mut();
     state.cb.push(ptr);
     ret
   }
 
-  pub fn get_resolve(&self) -> Rc<ClosureKind> {
-    self.get_closure(CallbackKind::Arg1(Box::new(|x| Ok(x))))
-  }
+  // pub fn get(&self) -> Rc<ClosureKind> {
+  //   self.get_closure(CallbackKind::Arg1(Box::new(|x| Ok(x))))
+  // }
 
-  pub fn get_reject(&self) -> Rc<ClosureKind> {
-    self.get_closure(CallbackKind::Arg1(Box::new(|x| Err(x))))
-  }
+  // pub fn get_closure(&self, callback: CallbackKind) -> Rc<ClosureKind> {
+  //   let state = self.inner.clone();
+  //   let closure_kind = match callback {
+  //     CallbackKind::Arg0(mut f) => ClosureKind::Arg0(Closure::once(move || finish(&state, f()))),
+  //     CallbackKind::Arg1(mut f) => {
+  //       ClosureKind::Arg1(Closure::once(move |a1| finish(&state, f(a1))))
+  //     }
+  //     CallbackKind::Arg2(mut f) => {
+  //       ClosureKind::Arg2(Closure::once(move |a1, a2| finish(&state, f(a1, a2))))
+  //     }
+  //     CallbackKind::Arg3(mut f) => ClosureKind::Arg3(Closure::once(move |a1, a2, a3| {
+  //       finish(&state, f(a1, a2, a3))
+  //     })),
+  //     CallbackKind::Arg4(mut f) => ClosureKind::Arg4(Closure::once(move |a1, a2, a3, a4| {
+  //       finish(&state, f(a1, a2, a3, a4))
+  //     })),
+  //     CallbackKind::Arg5(mut f) => ClosureKind::Arg5(Closure::once(move |a1, a2, a3, a4, a5| {
+  //       finish(&state, f(a1, a2, a3, a4, a5))
+  //     })),
+  //   };
+  //   let ptr = Rc::new(closure_kind);
+  //   let ret = Rc::clone(&ptr);
+  //   let mut state = self.inner.borrow_mut();
+  //   state.cb.push(ptr);
+  //   ret
+  // }
 
-  pub fn get_node(&self) -> Rc<ClosureKind> {
-    self.get_closure(CallbackKind::Arg2(Box::new(|err, data| {
-      if err == JsValue::UNDEFINED || err == JsValue::NULL {
-        return Ok(data);
-      }
-      Err(err)
-    })))
-  }
+  // pub fn get_resolve(&self) -> Rc<ClosureKind> {
+  //   self.get_closure(CallbackKind::Arg1(Box::new(|x| Ok(x))))
+  // }
+
+  // pub fn get_reject(&self) -> Rc<ClosureKind> {
+  //   self.get_closure(CallbackKind::Arg1(Box::new(|x| Err(x))))
+  // }
+
+  // pub fn get_node(&self) -> Rc<ClosureKind> {
+  //   self.get_closure(CallbackKind::Arg2(Box::new(|err, data| {
+  //     if err == JsValue::UNDEFINED || err == JsValue::NULL {
+  //       return Ok(data);
+  //     }
+  //     Err(err)
+  //   })))
+  // }
 }
 
 impl Future for CallbackWrapper {
@@ -103,9 +143,9 @@ impl Future for CallbackWrapper {
   }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 struct CallbackWrapperInner {
-  cb: Vec<Rc<ClosureKind>>,
+  cb: Vec<Rc<dyn CallbackMarker>>,
   result: Option<Result<JsValue, JsValue>>,
   task: Option<Waker>,
 }
