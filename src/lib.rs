@@ -1,10 +1,8 @@
-mod callback_kind;
+mod callback;
 mod callback_wrapper;
-mod closure_kind;
 
-pub use callback_kind::CallbackKind;
+pub use callback::{Callback, CallbackMarker};
 pub use callback_wrapper::CallbackWrapper;
-pub use closure_kind::ClosureKind;
 
 #[cfg(test)]
 mod tests {
