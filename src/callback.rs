@@ -4,19 +4,15 @@ use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsValue;
 
 #[derive(Debug)]
-pub struct Callback<F: ?Sized> {
+pub struct Callback<F: 'static + ?Sized> {
   closure: Closure<F>,
 }
 
-impl<F: ?Sized> Callback<F> {
-  pub fn new(closure: Closure<F>) -> Self
-  where
-    F: 'static,
-  {
+impl<F: 'static + ?Sized> Callback<F> {
+  pub fn new(closure: Closure<F>) -> Self {
     Self { closure }
   }
 
-  /// TODO: Should this be "as_function" or "to_function"?
   pub fn as_function(&self) -> Function {
     let js_func: JsValue = self.closure.as_ref().into();
     let func: Function = js_func.into();
