@@ -8,7 +8,7 @@ use std::task::Waker;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsValue;
 
-fn finish(state: &RefCell<CallbackWrapperInner>, val: Result<JsValue, JsValue>) {
+fn finish(state: &RefCell<CallbackFutureInner>, val: Result<JsValue, JsValue>) {
   let task = {
     let mut state = state.borrow_mut();
     debug_assert!(state.result.is_none());
@@ -25,15 +25,15 @@ fn finish(state: &RefCell<CallbackWrapperInner>, val: Result<JsValue, JsValue>) 
 }
 
 #[derive(Debug)]
-pub struct CallbackWrapper {
-  inner: Rc<RefCell<CallbackWrapperInner>>,
+pub struct CallbackFuture {
+  inner: Rc<RefCell<CallbackFutureInner>>,
 }
 
-impl CallbackWrapper {
-  /// Creates a new `CallbackWrapper` ... TODO:
+impl CallbackFuture {
+  /// Creates a new `CallbackFuture` ... TODO:
   pub fn new() -> Self {
     Self {
-      inner: CallbackWrapperInner::new(),
+      inner: CallbackFutureInner::new(),
     }
   }
 
@@ -151,7 +151,7 @@ impl CallbackWrapper {
   }
 }
 
-impl Future for CallbackWrapper {
+impl Future for CallbackFuture {
   type Output = Result<JsValue, JsValue>;
 
   fn poll(
@@ -168,15 +168,15 @@ impl Future for CallbackWrapper {
 }
 
 #[derive(Debug)]
-struct CallbackWrapperInner {
+struct CallbackFutureInner {
   cb: Vec<Rc<dyn CallbackMarker>>,
   result: Option<Result<JsValue, JsValue>>,
   task: Option<Waker>,
 }
 
-impl CallbackWrapperInner {
-  fn new() -> Rc<RefCell<CallbackWrapperInner>> {
-    Rc::new(RefCell::new(CallbackWrapperInner {
+impl CallbackFutureInner {
+  fn new() -> Rc<RefCell<CallbackFutureInner>> {
+    Rc::new(RefCell::new(CallbackFutureInner {
       cb: Vec::new(),
       task: None,
       result: None,

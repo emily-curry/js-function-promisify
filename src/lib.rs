@@ -1,8 +1,8 @@
 mod callback;
-mod callback_wrapper;
+mod callback_future;
 
 pub use callback::{Callback, CallbackMarker};
-pub use callback_wrapper::CallbackWrapper;
+pub use callback_future::CallbackFuture;
 
 #[cfg(test)]
 mod tests {

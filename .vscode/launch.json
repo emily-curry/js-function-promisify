@@ -7,7 +7,7 @@
     {
       "type": "lldb",
       "request": "launch",
-      "name": "Unit Tests",
+      "name": "Test",
       "cargo": {
         "args": [
           "test",
