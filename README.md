@@ -19,7 +19,7 @@ web_sys::window().unwrap()
     future.get_arg0(|| Ok("Hello future!".into())).as_function().as_ref(),
     500)
   .unwrap();
-let result = future.await; // result is a Result<JsValue, JsValue>
+let result = future.await; // result: Result<JsValue, JsValue>
 assert_eq!(result.unwrap().as_string().unwrap(), "Hello future!"); // 🦀
 ```
 

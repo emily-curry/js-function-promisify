@@ -1,8 +1,6 @@
 mod callback;
-mod callback_future;
 
-pub use callback::{Callback, CallbackMarker};
-pub use callback_future::CallbackFuture;
+pub use callback::Callback;
 
 #[cfg(test)]
 mod tests {
