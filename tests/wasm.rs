@@ -1,4 +1,5 @@
 use js_function_promisify::Callback;
+use js_function_promisify::CallbackPair;
 use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
@@ -40,4 +41,27 @@ async fn closure_dropped_after_await() {
   assert_eq!(resolve_ref.upgrade().is_some(), true); // Assert resolve_ref `Some`
   future.await.unwrap();
   assert_eq!(resolve_ref.upgrade().is_none(), true); // Assert resolve_ref `None`
+}
+
+#[wasm_bindgen_test]
+async fn pair_closure_dropped_after_await() {
+  let future = CallbackPair::from_arg0(|| Ok("".into()), || Err("".into()));
+  let req: IdbOpenDbRequest = window()
+    .expect("window not available")
+    .indexed_db()
+    .unwrap()
+    .expect("idb not available")
+    .open("my_db")
+    .expect("Failed to get idb request");
+  let wref = {
+    let closures = future.as_closures();
+    let weak_ref = Rc::downgrade(&closures);
+    req.set_onsuccess(Some(closures.0.as_ref().as_ref().unchecked_ref()));
+    req.set_onerror(Some(closures.1.as_ref().as_ref().unchecked_ref()));
+    assert_eq!(weak_ref.upgrade().is_some(), true); // Assert resolve_ref `Some`
+    weak_ref
+  };
+  assert_eq!(wref.upgrade().is_some(), true); // Assert resolve_ref `Some`
+  future.await.unwrap();
+  assert_eq!(wref.upgrade().is_none(), true); // Assert resolve_ref `None`
 }
