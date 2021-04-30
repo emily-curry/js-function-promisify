@@ -45,7 +45,7 @@ async fn closure_dropped_after_await() {
 
 #[wasm_bindgen_test]
 async fn pair_closure_dropped_after_await() {
-  let future = CallbackPair::from_arg0(|| Ok("".into()), || Err("".into()));
+  let future = CallbackPair::new(|| Ok("".into()), || Err("".into()));
   let req: IdbOpenDbRequest = window()
     .expect("window not available")
     .indexed_db()

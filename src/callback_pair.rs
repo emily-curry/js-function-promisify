@@ -23,6 +23,13 @@ where
   A: 'static + ?Sized,
   B: 'static + ?Sized,
 {
+  pub fn new<X, Y>(x: X, y: Y) -> CallbackPair<A, B>
+  where
+    Self: From<(X, Y)>,
+  {
+    Self::from((x, y))
+  }
+
   pub fn as_functions(&self) -> (Function, Function) {
     let left: JsValue = self
       .inner
@@ -52,6 +59,7 @@ where
   }
 }
 
+/// Standard impl of Future for CallbackPair.
 impl<A, B> Future for CallbackPair<A, B>
 where
   A: 'static + ?Sized,
@@ -72,34 +80,76 @@ where
   }
 }
 
-impl<A, B> From<(A, B)> for CallbackPair<dyn FnMut(), dyn FnMut()>
-where
-  A: 'static + FnMut() -> Result<JsValue, JsValue>,
-  B: 'static + FnMut() -> Result<JsValue, JsValue>,
-{
-  fn from(cb: (A, B)) -> Self {
-    let inner = CallbackPairInner::new();
-    let state = Rc::clone(&inner);
-    let mut a = cb.0;
-    let left = Closure::once(move || CallbackPairInner::finish(&state, a()));
-    let state = Rc::clone(&inner);
-    let mut b = cb.1;
-    let right = Closure::once(move || CallbackPairInner::finish(&state, b()));
-    let ptr = Rc::new((left, right));
-    inner.borrow_mut().cb = Some(ptr);
-    CallbackPair { inner }
-  }
+// impl with macro rules
+// see: https://rustwasm.github.io/wasm-bindgen/api/src/wasm_bindgen/closure.rs.html#551
+macro_rules! from_impl {
+  // The main arm of this macro. Generates a single From impl for CallbackPair.
+  // a - The list of parameter types that FnMut A takes.
+  // b - The list of parameter types that FnMut B takes.
+  // alist - The argument list of A.
+  // blist - The argument list of B.
+  (($($a:ty),*), ($($b:ty),*), ($($alist:ident),*), ($($blist:ident),*)) => {
+    impl<A, B> From<(A, B)> for CallbackPair<dyn FnMut($($a,)*), dyn FnMut($($b,)*)>
+    where
+      A: 'static + FnMut($($a,)*) -> Result<JsValue, JsValue>,
+      B: 'static + FnMut($($b,)*) -> Result<JsValue, JsValue>,
+    {
+      fn from(cb: (A, B)) -> Self {
+        let inner = CallbackPairInner::new();
+        let state = Rc::clone(&inner);
+        let mut cb0 = cb.0;
+        let left = Closure::once(move |$($alist),*| CallbackPairInner::finish(&state, cb0($($alist),*)));
+        let state = Rc::clone(&inner);
+        let mut cb1 = cb.1;
+        let right = Closure::once(move |$($blist),*| CallbackPairInner::finish(&state, cb1($($blist),*)));
+        let ptr = Rc::new((left, right));
+        inner.borrow_mut().cb = Some(ptr);
+        CallbackPair { inner }
+      }
+    }
+  };
+  // Shorthand for the main arm. Based on the argument list, they generate the parameter types (always JsValue) for that list.
+  (($($a:ident,)*), ($($b:ident,)*)) => {
+    from_impl!(($(from_impl!(@rep $a JsValue)),*), ($(from_impl!(@rep $b JsValue)),*), ($($a),*), ($($b),*));
+  };
+  // Recursively generates a set of impls where the left arg list stays the same and the right arg list gets smaller.
+  (@left ($($a:ident,)*); $head:ident $($tail:tt)*) => {
+    from_impl!(($($a,)*), ($head, $($tail,)*));
+    from_impl!(@left ($($a,)*); $($tail)*);
+  };
+  // Recursively generates a set of impls where the right arg list stays the same and the left arg list gets smaller.
+  (@right ($($b:ident,)*); $head:ident $($tail:tt)*) => {
+    from_impl!(($head, $($tail,)*), ($($b,)*));
+    from_impl!(@right ($($b,)*); $($tail)*);
+  };
+  // For a list of identifiers, generates _every_ set of
+  ($head:ident $($tail:tt)*) => {
+    // Generate a From impl for the full set of arguments on both sides.
+    from_impl!(($head, $($tail,)*), ($head, $($tail,)*));
+    // Using the same set of arguments on the left side, recursively generate a From impl for every possible set of args on the right.
+    from_impl!(@left ($head, $($tail,)*); $($tail)*);
+    // An empty arg list will never be generated, so impl it here.
+    from_impl!(($head, $($tail,)*), ());
+    // Using the same set of arguments on the right side, recursively generate a From impl for every possible set of args on the left.
+    from_impl!(@right ($head, $($tail,)*); $($tail)*);
+    // An empty arg list will never be generated, so impl it here.
+    from_impl!((), ($head, $($tail,)*));
+    // Recurse inwards, generating the same definitions with one less argument.
+    from_impl!($($tail)*);
+  };
+  // Utility for replacing anything with a type.
+  (@rep $_t:tt $sub:ty) => {
+    $sub
+  };
+  // Empty arms for handling the end of recursion.
+  () => {
+    from_impl!((), ());
+  };
+  (@left ($($a:ident,)*); ) => {};
+  (@right ($($b:ident,)*); ) => {};
 }
 
-impl CallbackPair<dyn FnMut(), dyn FnMut()> {
-  pub fn from_arg0<A, B>(a: A, b: B) -> CallbackPair<dyn FnMut(), dyn FnMut()>
-  where
-    A: 'static + FnMut() -> Result<JsValue, JsValue>,
-    B: 'static + FnMut() -> Result<JsValue, JsValue>,
-  {
-    CallbackPair::from((a, b))
-  }
-}
+from_impl!(a0 a1 a2 a3 a4 a5 a6); // Generate From impls for every possible permutation of arguments in either callback, up to 7.
 
 #[derive(Debug)]
 pub struct CallbackPairInner<A, B>
@@ -149,9 +199,80 @@ mod tests {
 
   wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
+  /// We could write a macro for this, but then I wouldn't be totally confident it captured every permutation.
+  /// For now, we relish in the beauty of our christmas tree.
+  #[wasm_bindgen_test]
+  #[rustfmt::skip]
+  fn should_compile_with_any_args() {
+    let _r = CallbackPair::new(|| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), || Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a| Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a, _b| Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a, _b, _c| Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a, _b, _c, _d| Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a, _b, _c, _d, _e| Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a, _b, _c, _d, _e, _f| Err("".into()));
+    let _r = CallbackPair::new(|| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+    let _r = CallbackPair::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()), |_a, _b, _c, _d, _e, _f, _g| Err("".into()));
+  }
+
   #[wasm_bindgen_test]
   async fn inner_dropped_after_await() {
-    let future = CallbackPair::from_arg0(|| Ok("".into()), || Err("".into()));
+    let future = CallbackPair::new(|| Ok("".into()), || Err("".into()));
     let req: IdbOpenDbRequest = window()
       .expect("window not available")
       .indexed_db()
