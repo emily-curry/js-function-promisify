@@ -59,6 +59,12 @@ where
   }
 }
 
+impl CallbackPair<dyn FnMut(JsValue), dyn FnMut(JsValue)> {
+  pub fn new_promise() -> Self {
+    Self::from((|data| Ok(data), |err| Err(err)))
+  }
+}
+
 /// Standard impl of Future for CallbackPair.
 impl<A, B> Future for CallbackPair<A, B>
 where
@@ -314,5 +320,27 @@ mod tests {
     assert_eq!(wref.upgrade().is_some(), true); // Assert resolve_ref `Some`
     future.await.unwrap();
     assert_eq!(wref.upgrade().is_none(), true); // Assert resolve_ref `None`
+  }
+
+  #[wasm_bindgen_test]
+  async fn new_promise_left_resolve() {
+    let future = CallbackPair::new_promise();
+    web_sys::window()
+      .unwrap()
+      .set_timeout_with_callback_and_timeout_and_arguments_0(future.as_functions().0.as_ref(), 200)
+      .unwrap();
+    let result = future.await;
+    assert_eq!(result.is_ok(), true); // Assert is `Ok`
+  }
+
+  #[wasm_bindgen_test]
+  async fn new_promise_right_reject() {
+    let future = CallbackPair::new_promise();
+    web_sys::window()
+      .unwrap()
+      .set_timeout_with_callback_and_timeout_and_arguments_0(future.as_functions().1.as_ref(), 200)
+      .unwrap();
+    let result = future.await;
+    assert_eq!(result.is_err(), true); // Assert is `Err`
   }
 }
