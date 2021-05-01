@@ -12,7 +12,7 @@ result === 'Hello future!'; // true
 
 To accomplish the same thing with `js-function-promisify`:
 
-```rs
+```rust
 let future = Callback::new(|| Ok("Hello future!".into()));
   web_sys::window()
     .unwrap()
