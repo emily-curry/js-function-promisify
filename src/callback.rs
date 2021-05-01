@@ -15,6 +15,13 @@ pub struct Callback<F: 'static + ?Sized> {
 }
 
 impl<F: 'static + ?Sized> Callback<F> {
+  pub fn new<X>(x: X) -> Callback<F>
+  where
+    Self: From<X>,
+  {
+    Self::from(x)
+  }
+
   pub fn as_function(&self) -> Function {
     let js_func: JsValue = self
       .inner
@@ -34,6 +41,7 @@ impl<F: 'static + ?Sized> Callback<F> {
   }
 }
 
+/// Standard Future impl for Callback<T>
 impl<F: 'static + ?Sized> Future for Callback<F> {
   type Output = Result<JsValue, JsValue>;
 
@@ -50,49 +58,48 @@ impl<F: 'static + ?Sized> Future for Callback<F> {
   }
 }
 
-impl<F> From<F> for Callback<dyn FnMut()>
-where
-  F: 'static + FnMut() -> Result<JsValue, JsValue>,
-{
-  fn from(mut cb: F) -> Self {
-    let inner = CallbackInner::new();
-    let state = Rc::clone(&inner);
-    let closure = Closure::once(move || CallbackInner::finish(&state, cb()));
-    let ptr = Rc::new(closure);
-    inner.borrow_mut().cb = Some(ptr);
-    Callback { inner }
-  }
+/// A utility macro for generating every possible implementation of `From<A> for Callback`.
+macro_rules! from_impl {
+  // The main arm of this macro. Generates a single From impl for Callback.
+  // a - The list of parameter types that FnMut A takes.
+  // alist - The argument list of A.
+  (($($a:ty),*), ($($alist:ident),*)) => {
+    impl<A> From<A> for Callback<dyn FnMut($($a,)*)>
+    where
+      A: 'static + FnMut($($a,)*) -> Result<JsValue, JsValue>,
+    {
+      fn from(mut cb: A) -> Self {
+        let inner = CallbackInner::new();
+        let state = Rc::clone(&inner);
+        let closure = Closure::once(move |$($alist),*| CallbackInner::finish(&state, cb($($alist),*)));
+        let ptr = Rc::new(closure);
+        inner.borrow_mut().cb = Some(ptr);
+        Callback { inner }
+      }
+    }
+  };
+  // Shorthand for the main arm. Based on the argument list, generate the parameter types (always JsValue) for that list.
+  (($($a:ident,)*)) => {
+    from_impl!(($(from_impl!(@rep $a JsValue)),*), ($($a),*));
+  };
+  // For a list of identifiers, recursively generates a From impl for that list and every list with less args.
+  ($head:ident $($tail:tt)*) => {
+    // Generate a From impl for the full set of arguments.
+    from_impl!(($head, $($tail,)*));
+    // Recurse inwards, generating the same definitions with one less argument.
+    from_impl!($($tail)*);
+  };
+  // Utility for replacing anything with a type.
+  (@rep $_t:tt $sub:ty) => {
+    $sub
+  };
+  // Empty arms for handling the end of recursion.
+  () => {
+    from_impl!(());
+  };
 }
 
-impl<F> From<F> for Callback<dyn FnMut(JsValue)>
-where
-  F: 'static + FnMut(JsValue) -> Result<JsValue, JsValue>,
-{
-  fn from(mut cb: F) -> Self {
-    let inner = CallbackInner::new();
-    let state = Rc::clone(&inner);
-    let closure = Closure::once(move |a1| CallbackInner::finish(&state, cb(a1)));
-    let ptr = Rc::new(closure);
-    inner.borrow_mut().cb = Some(ptr);
-    Callback { inner }
-  }
-}
-
-impl Callback<dyn FnMut()> {
-  pub fn from_arg0<T>(cb: T) -> Callback<dyn FnMut()>
-  where
-    T: 'static + FnMut() -> Result<JsValue, JsValue>,
-  {
-    Callback::from(cb)
-  }
-
-  pub fn from_arg1<T>(cb: T) -> Callback<dyn FnMut(JsValue)>
-  where
-    T: 'static + FnMut(JsValue) -> Result<JsValue, JsValue>,
-  {
-    Callback::from(cb)
-  }
-}
+from_impl!(a0 a1 a2 a3 a4 a5 a6); // Generate From impls for each list of arguments, up to 7.
 
 #[derive(Debug)]
 pub struct CallbackInner<F: 'static + ?Sized> {
@@ -135,9 +142,23 @@ mod tests {
 
   wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
+  /// Not quite as beatiful as the CallbackPair test, but still important to enumerate every expected valid From impl.
   #[wasm_bindgen_test]
-  async fn function_dropped_after_await() {
-    let future = Callback::from_arg0(|| Ok("".into()));
+  #[rustfmt::skip]
+  fn should_compile_with_any_args() {
+    let _r = Callback::new(|| Ok("".into()));
+    let _r = Callback::new(|_a| Ok("".into()));
+    let _r = Callback::new(|_a, _b| Ok("".into()));
+    let _r = Callback::new(|_a, _b, _c| Ok("".into()));
+    let _r = Callback::new(|_a, _b, _c, _d| Ok("".into()));
+    let _r = Callback::new(|_a, _b, _c, _d, _e| Ok("".into()));
+    let _r = Callback::new(|_a, _b, _c, _d, _e, _f| Ok("".into()));
+    let _r = Callback::new(|_a, _b, _c, _d, _e, _f, _g| Ok("".into()));
+  }
+
+  #[wasm_bindgen_test]
+  async fn inner_dropped_after_await() {
+    let future = Callback::new(|| Ok("".into()));
     let req: IdbOpenDbRequest = window()
       .expect("window not available")
       .indexed_db()
@@ -155,5 +176,27 @@ mod tests {
     assert_eq!(inner_ref.upgrade().is_some(), true); // Assert inner_ref `Some`
     future.await.unwrap();
     assert_eq!(inner_ref.upgrade().is_none(), true); // Assert inner_ref `None`
+  }
+
+  #[wasm_bindgen_test]
+  async fn closure_dropped_after_await() {
+    let future = Callback::new(|| Ok("".into()));
+    let req: IdbOpenDbRequest = window()
+      .expect("window not available")
+      .indexed_db()
+      .unwrap()
+      .expect("idb not available")
+      .open("my_db")
+      .expect("Failed to get idb request");
+    req.set_onerror(Some(future.as_closure().as_ref().as_ref().unchecked_ref()));
+    let resolve_ref = {
+      let weak_ref = Rc::downgrade(&future.as_closure());
+      req.set_onsuccess(Some(future.as_closure().as_ref().as_ref().unchecked_ref()));
+      assert_eq!(weak_ref.upgrade().is_some(), true); // Assert resolve_ref `Some`
+      weak_ref
+    };
+    assert_eq!(resolve_ref.upgrade().is_some(), true); // Assert resolve_ref `Some`
+    future.await.unwrap();
+    assert_eq!(resolve_ref.upgrade().is_none(), true); // Assert resolve_ref `None`
   }
 }

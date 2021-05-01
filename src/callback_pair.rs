@@ -80,8 +80,7 @@ where
   }
 }
 
-// impl with macro rules
-// see: https://rustwasm.github.io/wasm-bindgen/api/src/wasm_bindgen/closure.rs.html#551
+/// A utility macro for generating every possible implementation of `From<A, B> for CallbackPair`.
 macro_rules! from_impl {
   // The main arm of this macro. Generates a single From impl for CallbackPair.
   // a - The list of parameter types that FnMut A takes.
@@ -108,7 +107,7 @@ macro_rules! from_impl {
       }
     }
   };
-  // Shorthand for the main arm. Based on the argument list, they generate the parameter types (always JsValue) for that list.
+  // Shorthand for the main arm. Based on the argument list, generate the parameter types (always JsValue) for that list.
   (($($a:ident,)*), ($($b:ident,)*)) => {
     from_impl!(($(from_impl!(@rep $a JsValue)),*), ($(from_impl!(@rep $b JsValue)),*), ($($a),*), ($($b),*));
   };
@@ -122,7 +121,7 @@ macro_rules! from_impl {
     from_impl!(($head, $($tail,)*), ($($b,)*));
     from_impl!(@right ($($b,)*); $($tail)*);
   };
-  // For a list of identifiers, generates _every_ set of
+  // For a list of identifiers, creates every set of possible combinations of those identifiers and generates From<A, B> impls for them.
   ($head:ident $($tail:tt)*) => {
     // Generate a From impl for the full set of arguments on both sides.
     from_impl!(($head, $($tail,)*), ($head, $($tail,)*));
@@ -194,6 +193,7 @@ where
 mod tests {
   use crate::CallbackPair;
   use std::rc::Rc;
+  use wasm_bindgen::JsCast;
   use wasm_bindgen_test::*;
   use web_sys::{window, IdbOpenDbRequest};
 
@@ -291,5 +291,28 @@ mod tests {
     assert_eq!(inner_ref.upgrade().is_some(), true); // Assert inner_ref `Some`
     future.await.unwrap();
     assert_eq!(inner_ref.upgrade().is_none(), true); // Assert inner_ref `None`
+  }
+
+  #[wasm_bindgen_test]
+  async fn closure_dropped_after_await() {
+    let future = CallbackPair::new(|| Ok("".into()), || Err("".into()));
+    let req: IdbOpenDbRequest = window()
+      .expect("window not available")
+      .indexed_db()
+      .unwrap()
+      .expect("idb not available")
+      .open("my_db")
+      .expect("Failed to get idb request");
+    let wref = {
+      let closures = future.as_closures();
+      let weak_ref = Rc::downgrade(&closures);
+      req.set_onsuccess(Some(closures.0.as_ref().as_ref().unchecked_ref()));
+      req.set_onerror(Some(closures.1.as_ref().as_ref().unchecked_ref()));
+      assert_eq!(weak_ref.upgrade().is_some(), true); // Assert resolve_ref `Some`
+      weak_ref
+    };
+    assert_eq!(wref.upgrade().is_some(), true); // Assert resolve_ref `Some`
+    future.await.unwrap();
+    assert_eq!(wref.upgrade().is_none(), true); // Assert resolve_ref `None`
   }
 }
