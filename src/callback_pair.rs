@@ -90,16 +90,16 @@ macro_rules! from_impl {
   (($($a:ty),*), ($($b:ty),*), ($($alist:ident),*), ($($blist:ident),*)) => {
     impl<A, B> From<(A, B)> for CallbackPair<dyn FnMut($($a,)*), dyn FnMut($($b,)*)>
     where
-      A: 'static + FnMut($($a,)*) -> Result<JsValue, JsValue>,
-      B: 'static + FnMut($($b,)*) -> Result<JsValue, JsValue>,
+      A: 'static + FnOnce($($a,)*) -> Result<JsValue, JsValue>,
+      B: 'static + FnOnce($($b,)*) -> Result<JsValue, JsValue>,
     {
       fn from(cb: (A, B)) -> Self {
         let inner = CallbackPairInner::new();
         let state = Rc::clone(&inner);
-        let mut cb0 = cb.0;
+        let cb0 = cb.0;
         let left = Closure::once(move |$($alist),*| CallbackPairInner::finish(&state, cb0($($alist),*)));
         let state = Rc::clone(&inner);
-        let mut cb1 = cb.1;
+        let cb1 = cb.1;
         let right = Closure::once(move |$($blist),*| CallbackPairInner::finish(&state, cb1($($blist),*)));
         let ptr = Rc::new((left, right));
         inner.borrow_mut().cb = Some(ptr);

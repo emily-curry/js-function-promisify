@@ -66,9 +66,9 @@ macro_rules! from_impl {
   (($($a:ty),*), ($($alist:ident),*)) => {
     impl<A> From<A> for Callback<dyn FnMut($($a,)*)>
     where
-      A: 'static + FnMut($($a,)*) -> Result<JsValue, JsValue>,
+      A: 'static + FnOnce($($a,)*) -> Result<JsValue, JsValue>,
     {
-      fn from(mut cb: A) -> Self {
+      fn from(cb: A) -> Self {
         let inner = CallbackInner::new();
         let state = Rc::clone(&inner);
         let closure = Closure::once(move |$($alist),*| CallbackInner::finish(&state, cb($($alist),*)));
