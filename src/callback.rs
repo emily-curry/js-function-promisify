@@ -15,11 +15,11 @@ pub struct Callback<F: 'static + ?Sized> {
 }
 
 impl<F: 'static + ?Sized> Callback<F> {
-  pub fn new<X>(x: X) -> Callback<F>
+  pub fn new<X>(closure: X) -> Callback<F>
   where
     Self: From<X>,
   {
-    Self::from(x)
+    Self::from(closure)
   }
 
   pub fn as_function(&self) -> Function {
@@ -38,6 +38,26 @@ impl<F: 'static + ?Sized> Callback<F> {
 
   pub fn as_closure(&self) -> Rc<Closure<F>> {
     Rc::clone(self.inner.borrow().cb.as_ref().unwrap())
+  }
+}
+
+/// The Default impl for Callback creates a single-arg callback, whose Result is always Ok.
+impl Default for Callback<dyn FnMut(JsValue)> {
+  fn default() -> Self {
+    Self::from(|data| Ok(data))
+  }
+}
+
+impl Callback<dyn FnMut(JsValue, JsValue)> {
+  /// Creates a node-style callback with the args `(err, data)`. If err is null or undefined,
+  /// the Result is Ok(data). Otherwise, it is Err(err).
+  pub fn default_node() -> Self {
+    Self::from(|err: JsValue, data: JsValue| {
+      if err.is_null() || err.is_undefined() {
+        return Ok(data);
+      }
+      Err(err)
+    })
   }
 }
 
@@ -135,7 +155,9 @@ impl<F: 'static + ?Sized> CallbackInner<F> {
 #[cfg(test)]
 mod tests {
   use crate::Callback;
+  use js_sys::Function;
   use std::rc::Rc;
+  use wasm_bindgen::prelude::*;
   use wasm_bindgen::JsCast;
   use wasm_bindgen_test::*;
   use web_sys::{window, IdbOpenDbRequest};
@@ -158,7 +180,7 @@ mod tests {
 
   #[wasm_bindgen_test]
   async fn inner_dropped_after_await() {
-    let future = Callback::new(|| Ok("".into()));
+    let future = Callback::default();
     let req: IdbOpenDbRequest = window()
       .expect("window not available")
       .indexed_db()
@@ -180,7 +202,7 @@ mod tests {
 
   #[wasm_bindgen_test]
   async fn closure_dropped_after_await() {
-    let future = Callback::new(|| Ok("".into()));
+    let future = Callback::default();
     let req: IdbOpenDbRequest = window()
       .expect("window not available")
       .indexed_db()
@@ -198,5 +220,43 @@ mod tests {
     assert_eq!(resolve_ref.upgrade().is_some(), true); // Assert resolve_ref `Some`
     future.await.unwrap();
     assert_eq!(resolve_ref.upgrade().is_none(), true); // Assert resolve_ref `None`
+  }
+
+  #[wasm_bindgen(
+    inline_js = "export function extern_node_success_null(cb) { cb(null, 'success') }; 
+    export function extern_node_success_undefined(cb) { cb(undefined, 'success') };
+    export function extern_node_failure(cb) { cb('failure', 'success') };"
+  )]
+  extern "C" {
+    fn extern_node_success_null(cb: &Function);
+    fn extern_node_success_undefined(cb: &Function);
+    fn extern_node_failure(cb: &Function);
+  }
+
+  #[wasm_bindgen_test]
+  async fn node_ok_if_arg0_null() {
+    let future = Callback::default_node();
+    extern_node_success_null(future.as_function().as_ref());
+    let result = future.await;
+    assert_eq!(result.is_ok(), true); // Assert is `Ok`
+    assert_eq!(result.unwrap(), "success");
+  }
+
+  #[wasm_bindgen_test]
+  async fn node_ok_if_arg0_undefined() {
+    let future = Callback::default_node();
+    extern_node_success_undefined(future.as_function().as_ref());
+    let result = future.await;
+    assert_eq!(result.is_ok(), true); // Assert is `Ok`
+    assert_eq!(result.unwrap(), "success");
+  }
+
+  #[wasm_bindgen_test]
+  async fn node_err_if_arg0_defined() {
+    let future = Callback::default_node();
+    extern_node_failure(future.as_function().as_ref());
+    let result = future.await;
+    assert_eq!(result.is_err(), true); // Assert is `Err`
+    assert_eq!(result.unwrap_err(), "failure");
   }
 }

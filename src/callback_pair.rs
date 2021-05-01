@@ -59,8 +59,10 @@ where
   }
 }
 
-impl CallbackPair<dyn FnMut(JsValue), dyn FnMut(JsValue)> {
-  pub fn new_promise() -> Self {
+/// The Default impl for CallbackPair creates a pair of single-arg `(resolve, reject)` callbacks,
+/// similar to the javascript Promise contsructor.
+impl Default for CallbackPair<dyn FnMut(JsValue), dyn FnMut(JsValue)> {
+  fn default() -> Self {
     Self::from((|data| Ok(data), |err| Err(err)))
   }
 }
@@ -324,7 +326,7 @@ mod tests {
 
   #[wasm_bindgen_test]
   async fn new_promise_left_resolve() {
-    let future = CallbackPair::new_promise();
+    let future = CallbackPair::default();
     web_sys::window()
       .unwrap()
       .set_timeout_with_callback_and_timeout_and_arguments_0(future.as_functions().0.as_ref(), 200)
@@ -335,7 +337,7 @@ mod tests {
 
   #[wasm_bindgen_test]
   async fn new_promise_right_reject() {
-    let future = CallbackPair::new_promise();
+    let future = CallbackPair::default();
     web_sys::window()
       .unwrap()
       .set_timeout_with_callback_and_timeout_and_arguments_0(future.as_functions().1.as_ref(), 200)
