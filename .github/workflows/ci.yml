@@ -39,5 +39,6 @@ jobs:
         toolchain: stable
         override: true
     - uses: katyo/publish-crates@v1
+      continue-on-error: true
       with:
         registry-token: ${{ secrets.CARGO_TOKEN }}
