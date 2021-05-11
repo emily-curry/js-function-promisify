@@ -9,7 +9,7 @@ license = "MIT"
 name = "js-function-promisify"
 readme = "README.md"
 repository = "https://github.com/emily-curry/js-function-promisify"
-version = "0.2.0"
+version = "0.2.1"
 
 [dependencies]
 js-sys = {version = "^0.3.0"}
