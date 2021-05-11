@@ -1,5 +1,7 @@
 # js-function-promisify
 
+![docs](https://docs.rs/js-function-promisify/badge.svg)
+
 This package provides utilities for working with `js_sys::Function` callbacks in async rust the same way you might in javascript. For example, to wait on a timeout to complete in javascript, one might write:
 
 ```js
@@ -14,13 +16,13 @@ To accomplish the same thing with `js-function-promisify`:
 
 ```rust
 let future = Callback::new(|| Ok("Hello future!".into()));
-  web_sys::window()
-    .unwrap()
-    .set_timeout_with_callback_and_timeout_and_arguments_0(
-      future.as_function().as_ref(),
-      500)
-    .unwrap();
-  let result = future.await; // result: Result<JsValue, JsValue>
+web_sys::window()
+  .unwrap()
+  .set_timeout_with_callback_and_timeout_and_arguments_0(
+    future.as_function().as_ref(),
+    500)
+  .unwrap();
+let result = future.await; // result: Result<JsValue, JsValue>
 assert_eq!(result.unwrap().as_string().unwrap(), "Hello future!"); // 🦀
 ```
 
