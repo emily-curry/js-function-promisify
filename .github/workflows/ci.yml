@@ -28,4 +28,17 @@ jobs:
       run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
     - name: Test Safari
       run: wasm-pack test --headless --safari
-
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [test, test-safari]
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    - uses: katyo/publish-crates@v1
+      with:
+        registry-token: ${{ secrets.CARGO_TOKEN }}
+        dry-run: true
