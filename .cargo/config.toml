@@ -1,5 +1,2 @@
-[build]
-target = "wasm32-unknown-unknown"
-
 [target.wasm32-unknown-unknown]
 runner = 'wasm-bindgen-test-runner'
