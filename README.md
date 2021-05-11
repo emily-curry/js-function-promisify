@@ -1,6 +1,6 @@
 # js-function-promisify
 
-![docs](https://docs.rs/js-function-promisify/badge.svg)
+[![docs](https://docs.rs/js-function-promisify/badge.svg)](https://docs.rs/js-function-promisify/)
 
 This package provides utilities for working with `js_sys::Function` callbacks in async rust the same way you might in javascript. For example, to wait on a timeout to complete in javascript, one might write:
 
